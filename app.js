@@ -360,13 +360,6 @@ function stopGame() {
     releaseAwake();
 }
 
-function cleanNarrative(text) {
-    const s = String(text).replace(/\s+/g, ' ').trim();
-    if (s.length < 10 || s.length > 240) return null;
-    if (/[぀-ヿ一-鿿가-힯]/.test(s)) return null; // el modelo a veces se pasa al chino
-    return s;
-}
-
 // Asegúrate de guardar el texto exacto que le envías al usuario en una variable
 function requestNarrative(place) {
     // 1. Definimos un texto por defecto y lo mostramos INMEDIATAMENTE.
@@ -409,12 +402,9 @@ function requestNarrative(place) {
             .replace(/\[\/?INST\]/gi, '')             // Borra etiquetas de instrucciones
             .trim();
 
-        // 4. Pasamos por tu función de limpieza original
-        const s = cleanNarrative(rawText);
-
-        // 5. Si el juego sigue en curso, no se reinició el nivel, y el texto es válido, actualizamos el HTML
-        if (game.running && game.token === token && s) {
-            $('narrative').textContent = s;
+        // 4. Si el juego sigue en curso y no se reinició el nivel, actualizamos el HTML
+        if (game.running && game.token === token) {
+            $('narrative').textContent = rawText;
         }
     })
     .catch((error) => {
