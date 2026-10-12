@@ -369,43 +369,57 @@ function cleanNarrative(text) {
 
 // Asegúrate de guardar el texto exacto que le envías al usuario en una variable
 function requestNarrative(place) {
-  const userPrompt = `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.`;
+    // 1. Definimos un texto por defecto y lo mostramos INMEDIATAMENTE.
+    // Así el jugador no se queda viendo "Generando..." y puede empezar a jugar.
+    const textoPorDefecto = `¡La misión es en ${place.name}! Recoge las ${STAR_COUNT} estrellas rápido.`;
+    $('narrative').textContent = textoPorDefecto;
 
-  ai.generate(
-      [
-          {
-              role: 'system',
-              content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
-          },
-          { role: 'user', content: userPrompt },
-      ],
-    { max_new_tokens: 60, do_sample: true, temperature: 0.8 },
-    60000
-  )
-  .then((text) => {
-      let rawText = typeof text === 'string' ? text : text?.text || text?.generated_text || "";
+    const token = game.token;
 
-      // 1. Buscamos dónde termina exactamente nuestro prompt dentro del texto gigante
-      const promptIndex = rawText.lastIndexOf(userPrompt);
-      if (promptIndex !== -1) {
-          // Cortamos todo lo que está antes, dejando solo lo que generó después de nuestro prompt
-          rawText = rawText.substring(promptIndex + userPrompt.length);
-      }
+    // Guardamos el prompt exacto del usuario para poder recortarlo después
+    const userPrompt = `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.`;
 
-      // 2. Limpiamos cualquier "etiqueta" interna que el modelo haya dejado (ej: <|assistant|>, Assistant:, etc.)
-      rawText = rawText
-          .replace(/<[^>]+>/g, '')                  // Borra cosas entre < >
-          .replace(/(assistant|sistema|user|bot):/gi, '') // Borra prefijos de chat
-          .replace(/\[\/?INST\]/gi, '')             // Borra etiquetas de instrucciones
-          .trim();
+    ai.generate(
+        [
+            {
+                role: 'system',
+                content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
+            },
+            { role: 'user', content: userPrompt },
+        ],
 
-      // 3. Ahora sí, le pasamos el texto limpio a tu función
-      const s = cleanNarrative(rawText);
+        { max_new_tokens: 60, do_sample: true, temperature: 0.8 }
+    )
+    .then((text) => {
+        // Asegurarnos de que tenemos un string con el que trabajar
+        let rawText = typeof text === 'string' ? text : text?.text || text?.generated_text || "";
 
-      if (game.running && game.token === token && s) {
-          $('narrative').textContent = s;
-      }
-  })
+        // 2. RECORTAR EL HISTORIAL: Buscamos dónde termina nuestro prompt
+        const promptIndex = rawText.lastIndexOf(userPrompt);
+        if (promptIndex !== -1) {
+            // Nos quedamos solo con lo que la IA generó a partir de ahí
+            rawText = rawText.substring(promptIndex + userPrompt.length);
+        }
+
+        // 3. LIMPIAR ETIQUETAS: Borramos marcas internas que usan los modelos locales (ej: <|assistant|>)
+        rawText = rawText
+            .replace(/<[^>]+>/g, '')                  // Borra etiquetas HTML/XML
+            .replace(/(assistant|sistema|user|bot):/gi, '') // Borra prefijos de roles
+            .replace(/\[\/?INST\]/gi, '')             // Borra etiquetas de instrucciones
+            .trim();
+
+        // 4. Pasamos por tu función de limpieza original
+        const s = cleanNarrative(rawText);
+
+        // 5. Si el juego sigue en curso, no se reinició el nivel, y el texto es válido, actualizamos el HTML
+        if (game.running && game.token === token && s) {
+            $('narrative').textContent = s;
+        }
+    })
+    .catch((error) => {
+        // Si hay un error, el jugador ni se entera porque ya tiene el texto por defecto en pantalla
+        console.warn("Fallo en la generación de IA de fondo:", error);
+    });
 }
 
 
