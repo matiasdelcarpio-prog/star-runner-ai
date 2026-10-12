@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Runner AI - Hacktoberfest W1</title>
+    <!-- Tailwind CSS para diseño rápido y móvil -->
+    <script src="https://jsdelivr.net"></script>
+    <!-- Transformers.js para ejecutar IA Open-Source en el navegador -->
+    <script type="module">
+        import { pipeline } from 'https://jsdelivr.net';
+        window.pipeline = pipeline;
+    </script>
+</head>
+<body class="bg-slate-900 text-white font-sans min-h-screen flex flex-col justify-between p-4">
+
+    <!-- PANTALLA 1: CONFIGURACIÓN -->
+    <div id="setup-screen" class="space-y-6 my-auto">
+        <div class="text-center">
+            <h1 class="text-4xl font-extrabold text-lime-400 tracking-tight">⭐ Star Runner AI</h1>
+            <p class="text-slate-400 mt-2">Hacktoberfest 2026 - ¡A tocar pasto!</p>
+        </div>
+
+        <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">¿En qué plaza o parque estás?</label>
+                <input type="text" id="location" value="Plaza Central" class="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:outline-none focus:border-lime-400">
+            </div>
+            <button id="start-btn" class="w-full bg-lime-500 hover:bg-lime-600 text-slate-950 font-bold py-4 rounded-xl transition duration-200 text-lg shadow-lg shadow-lime-500/20">
+                Generar Misión con IA
+            </button>
+        </div>
+        <p id="loading-txt" class="text-center text-sm text-amber-400 hidden">🤖 La IA local está diseñando tu mapa... (puede tardar unos segundos la primera vez)</p>
+    </div>
+
+    <!-- PANTALLA 2: JUEGO -->
+    <div id="game-screen" class="hidden flex-1 flex-col justify-between py-4">
+        <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <h2 class="text-xs font-bold text-lime-400 uppercase tracking-widest">Misión de la IA:</h2>
+            <p id="ai-narrative" class="text-sm italic text-slate-200 mt-1">Generando...</p>
+        </div>
+
+        <!-- Tablero de Estado -->
+        <div class="text-center my-6 space-y-2">
+            <div class="text-6xl font-black text-amber-400" id="stars-count">⭐⭐⭐⭐⭐</div>
+            <p class="text-sm text-slate-400">Estrellas restantes en la plaza</p>
+            <div class="text-3xl font-mono font-bold mt-4" id="timer">00:00.00</div>
+        </div>
+
+        <!-- Simulación Física -->
+        <div class="space-y-3">
+            <p class="text-xs text-center text-slate-400">¡Corre en la vida real y presiona al llegar!</p>
+            <button id="collect-btn" class="w-full bg-amber-400 hover:bg-amber-500 text-slate-950 font-black py-5 rounded-2xl text-xl shadow-lg shadow-amber-400/20 uppercase tracking-wider">
+                ¡Recoger Estrella! 🏃‍♂️💨
+            </button>
+        </div>
+    </div>
+
+    <!-- PANTALLA 3: RESULTADOS -->
+    <div id="victory-screen" class="hidden text-center my-auto space-y-6">
+        <h2 class="text-5xl font-black text-lime-400">¡MISIÓN CUMPLIDA! 🎉</h2>
+        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 inline-block min-w-[250px]">
+            <p class="text-slate-400 text-sm uppercase font-bold tracking-wider">Tu Tiempo Final</p>
+            <p id="final-time" class="text-4xl font-mono font-black text-white mt-1">00:00</p>
+        </div>
+        <button onclick="location.reload()" class="block mx-auto bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-6 rounded-xl transition">
+            Jugar de nuevo
+        </button>
+    </div>
+
+    <script type = "module">
+
+        // IMPORTAR LAS FUNCIONES DESDE EL OTRO ARCHIVO
+        import { playClickSound, playStarSound } from './audio.js';
+
+        let starsLeft = 5;
+        let timerInterval;
+        let startTime;
+
+        const setupScreen = document.getElementById('setup-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const victoryScreen = document.getElementById('victory-screen');
+        const loadingTxt = document.getElementById('loading-txt');
+
+        document.getElementById('start-btn').addEventListener('click', async () => {
+
+            playClickSound();
+
+            const loc = document.getElementById('location').value;
+            loadingTxt.classList.remove('hidden');
+
+            try {
+                // Instanciamos el pipeline de generación de texto local (Open-Source)
+                // Usamos un modelo ultraligero para que corra rápido en el navegador
+                const generator = await window.pipeline('text-generation', 'Xenova/Qwen1.5-0.5B-Chat');
+
+                const prompt = `Genera una orden militar de juego muy corta (máximo 2 frases) para un corredor en ${loc}. Dile que recoja 5 estrellas espaciales rápido.;`
+                const output = await generator(prompt, { max_new_tokens: 50, temperature: 0.7 });
+
+                // Limpiamos la respuesta del modelo
+                let cleanText = output[0].generated_text.replace(prompt, '').trim();
+                document.getElementById('ai-narrative').innerText = cleanText || `¡Estrellas detectadas en ${loc}! Muévete rápido antes de que se desvanezcan.;`
+            } catch (e) {
+                // Fallback por si la red o el dispositivo bloquea el modelo pesado
+                document.getElementById('ai-narrative').innerText = `¡Alerta! 5 estrellas de energía acaban de caer en diferentes esquinas de ${loc}. ¡Ve por ellas!;`
+            }
+
+            // Cambiar de pantalla e iniciar juego
+            setupScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+            startTimer();
+        });
+
+        function startTimer() {
+            startTime = performance.now();
+            timerInterval = setInterval(() => {
+                const elapsed = performance.now() - startTime;
+                const minutes = Math.floor(elapsed / 60000).toString().padStart(2, '0');
+                const seconds = Math.floor((elapsed % 60000) / 1000).toString().padStart(2, '0');
+                const ms = Math.floor((elapsed % 1000) / 10).toString().padStart(2, '0');
+                document.getElementById('timer').innerText = `${minutes}:${seconds}.${ms};`
+            }, 30);
+        }
+
+        document.getElementById('collect-btn').addEventListener('click', () => {
+            if (starsLeft > 0) {
+
+                playStarSound();
+
+                starsLeft--;
+                document.getElementById('stars-count').innerText = '⭐'.repeat(starsLeft) || '❌ ¡Ninguna!';
+
+                // Efecto de feedback rápido
+                document.body.classList.add('bg-amber-500');
+                setTimeout(() => document.body.classList.remove('bg-amber-500'), 100);
+
+                if (starsLeft === 0) {
+                    clearInterval(timerInterval);
+                    document.getElementById('final-time').innerText = document.getElementById('timer').innerText;
+                    gameScreen.classList.add('hidden');
+                    victoryScreen.classList.remove('hidden');
+                }
+            }
+        });
+    </script>
+</body>
+</html>
