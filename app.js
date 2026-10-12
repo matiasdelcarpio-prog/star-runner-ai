@@ -368,42 +368,45 @@ function cleanNarrative(text) {
 }
 
 // Asegúrate de guardar el texto exacto que le envías al usuario en una variable
-const userPrompt = `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.`;
+function requestNarrative(place) {
+  const userPrompt = `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.`;
 
-ai.generate(
-    [
-        {
-            role: 'system',
-            content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
-        },
-        { role: 'user', content: userPrompt },
-    ],
-  { max_new_tokens: 60, do_sample: true, temperature: 0.8 } //
-)
-.then((text) => {
-    let rawText = typeof text === 'string' ? text : text?.text || text?.generated_text || "";
+  ai.generate(
+      [
+          {
+              role: 'system',
+              content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
+          },
+          { role: 'user', content: userPrompt },
+      ],
+    { max_new_tokens: 60, do_sample: true, temperature: 0.8 } //
+  )
+  .then((text) => {
+      let rawText = typeof text === 'string' ? text : text?.text || text?.generated_text || "";
 
-    // 1. Buscamos dónde termina exactamente nuestro prompt dentro del texto gigante
-    const promptIndex = rawText.lastIndexOf(userPrompt);
-    if (promptIndex !== -1) {
-        // Cortamos todo lo que está antes, dejando solo lo que generó después de nuestro prompt
-        rawText = rawText.substring(promptIndex + userPrompt.length);
-    }
+      // 1. Buscamos dónde termina exactamente nuestro prompt dentro del texto gigante
+      const promptIndex = rawText.lastIndexOf(userPrompt);
+      if (promptIndex !== -1) {
+          // Cortamos todo lo que está antes, dejando solo lo que generó después de nuestro prompt
+          rawText = rawText.substring(promptIndex + userPrompt.length);
+      }
 
-    // 2. Limpiamos cualquier "etiqueta" interna que el modelo haya dejado (ej: <|assistant|>, Assistant:, etc.)
-    rawText = rawText
-        .replace(/<[^>]+>/g, '')                  // Borra cosas entre < >
-        .replace(/(assistant|sistema|user|bot):/gi, '') // Borra prefijos de chat
-        .replace(/\[\/?INST\]/gi, '')             // Borra etiquetas de instrucciones
-        .trim();
+      // 2. Limpiamos cualquier "etiqueta" interna que el modelo haya dejado (ej: <|assistant|>, Assistant:, etc.)
+      rawText = rawText
+          .replace(/<[^>]+>/g, '')                  // Borra cosas entre < >
+          .replace(/(assistant|sistema|user|bot):/gi, '') // Borra prefijos de chat
+          .replace(/\[\/?INST\]/gi, '')             // Borra etiquetas de instrucciones
+          .trim();
 
-    // 3. Ahora sí, le pasamos el texto limpio a tu función
-    const s = cleanNarrative(rawText);
+      // 3. Ahora sí, le pasamos el texto limpio a tu función
+      const s = cleanNarrative(rawText);
 
-    if (game.running && game.token === token && s) {
-        $('narrative').textContent = s;
-    }
-})
+      if (game.running && game.token === token && s) {
+          $('narrative').textContent = s;
+      }
+  })
+}
+
 
 // ---------- GPS ----------
 function startGPS() {
