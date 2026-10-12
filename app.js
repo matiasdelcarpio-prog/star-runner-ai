@@ -367,51 +367,43 @@ function cleanNarrative(text) {
     return s;
 }
 
-function requestNarrative(place) {
-    console.log("BANDERA 1: Entrando a requestNarrative. Estado de IA:", ai.state);
+// Asegúrate de guardar el texto exacto que le envías al usuario en una variable
+const userPrompt = `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.`;
 
-    if (ai.state !== 'ready') {
-        console.log("BANDERA 2: La IA no está lista. Abortando.");
-        $('narrative').textContent = `¡La misión es en ${place.name}! (IA no disponible)`;
-        return;
+ai.generate(
+    [
+        {
+            role: 'system',
+            content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
+        },
+        { role: 'user', content: userPrompt },
+    ],
+  { max_new_tokens: 60, do_sample: true, temperature: 0.8 } //
+)
+.then((text) => {
+    let rawText = typeof text === 'string' ? text : text?.text || text?.generated_text || "";
+
+    // 1. Buscamos dónde termina exactamente nuestro prompt dentro del texto gigante
+    const promptIndex = rawText.lastIndexOf(userPrompt);
+    if (promptIndex !== -1) {
+        // Cortamos todo lo que está antes, dejando solo lo que generó después de nuestro prompt
+        rawText = rawText.substring(promptIndex + userPrompt.length);
     }
 
-    console.log("BANDERA 3: IA lista. Enviando prompt...");
-    const token = game.token;
+    // 2. Limpiamos cualquier "etiqueta" interna que el modelo haya dejado (ej: <|assistant|>, Assistant:, etc.)
+    rawText = rawText
+        .replace(/<[^>]+>/g, '')                  // Borra cosas entre < >
+        .replace(/(assistant|sistema|user|bot):/gi, '') // Borra prefijos de chat
+        .replace(/\[\/?INST\]/gi, '')             // Borra etiquetas de instrucciones
+        .trim();
 
-    // Cambiamos el texto temporalmente para saber que pasamos el return
-    $('narrative').textContent = `¡Alerta! ${STAR_COUNT} estrellas de energía acaban de caer en ${place.name}. ¡Ve por ellas!`;
+    // 3. Ahora sí, le pasamos el texto limpio a tu función
+    const s = cleanNarrative(rawText);
 
-    ai.generate(
-        [
-            {
-                role: 'system',
-                content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
-            },
-            { role: 'user', content: `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.` },
-        ],
-        { max_new_tokens: 60, do_sample: true, temperature: 0.8 },
-        60000 // Esperamos 1 minuto para cambiar la narrativa
-    )
-    .then((text) => {
-        console.log("BANDERA 4: Respuesta recibida", text);
-
-        let rawText = typeof text === 'string' ? text : JSON.stringify(text);
-
-        if (game.running && game.token === token) {
-            console.log("BANDERA 5: Actualizando HTML con la respuesta");
-            $('narrative').textContent = rawText;
-        } else {
-            console.log("BANDERA 6: El juego se detuvo o cambió el token antes de recibir respuesta");
-        }
-    })
-    .catch((error) => {
-        console.error("BANDERA ERROR: Falló ai.generate", error);
-        if (game.running && game.token === token) {
-            $('narrative').textContent = "Error de conexión con la IA.";
-        }
-    });
-}
+    if (game.running && game.token === token && s) {
+        $('narrative').textContent = s;
+    }
+})
 
 // ---------- GPS ----------
 function startGPS() {
