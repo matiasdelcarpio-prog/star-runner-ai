@@ -43,11 +43,11 @@ const setError = (t) => { errorEl.textContent = t || ''; };
 
 // ---------- IA (LLM en un Web Worker, carga en segundo plano) ----------
 const AI_LABELS = {
-    idle: () => '🤖 IA: preparando…',
-    loading: (p) => `🤖 IA: descargando ${p}% (puedes jugar mientras tanto)`,
-    ready: () => '🤖 IA lista',
-    error: () => '🤖 IA no disponible: se usará la búsqueda básica',
-    off: () => '🤖 IA en pausa para ahorrar datos',
+    idle: () => 'IA: preparando…',
+    loading: (p) => `IA: descargando ${p}%`,
+    ready: () => 'IA lista',
+    error: () => 'IA no disponible: se usará la búsqueda básica',
+    off: () => 'IA en pausa para ahorrar datos',
 };
 
 const ai = createAI(({ state, progress }) => {
@@ -105,16 +105,11 @@ async function interpretQuery(raw) {
         );
         return cleanPlaceName(out, raw) || raw;
     } catch {
-        return raw;
+        return 'error';
     }
 }
 
-function cleanNarrative(text) {
-    const s = String(text).replace(/\s+/g, ' ').trim();
-    if (s.length < 10 || s.length > 240) return null;
-    if (/[぀-ヿ一-鿿가-힯]/.test(s)) return null; // el modelo a veces se pasa al chino
-    return s;
-}
+
 
 // ---------- Búsqueda del lugar (Nominatim / OpenStreetMap) ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -174,10 +169,10 @@ function toPlace(r) {
 async function findPlace(raw) {
     let query = raw;
     if (ai.state === 'ready') {
-        setStatus('🤖 La IA está interpretando tu texto…');
+        setStatus('La IA está interpretando tu texto…');
         query = await interpretQuery(raw);
-    }
-    setStatus('🗺️ Buscando en el mapa de Córdoba…');
+    } else { return; }
+    setStatus('Buscando en el mapa de Córdoba…');
     let results = await nominatim(query);
     if (!results.length && query !== raw) {
         await sleep(1100); // Nominatim pide máximo 1 pedido por segundo
@@ -310,7 +305,7 @@ function startGame(place) {
         .map((p) => ({ lat: p.lat, lng: p.lng, taken: false, marker: null }));
 
     $('place-name').textContent = place.name;
-    $('narrative').textContent = `¡Alerta! ${STAR_COUNT} estrellas de energía acaban de caer en ${place.name}. ¡Ve por ellas!`;
+
     renderStars();
     renderDistance();
     clearTimeout(flashTimer);
@@ -365,27 +360,57 @@ function stopGame() {
     releaseAwake();
 }
 
+function cleanNarrative(text) {
+    const s = String(text).replace(/\s+/g, ' ').trim();
+    if (s.length < 10 || s.length > 240) return null;
+    if (/[぀-ヿ一-鿿가-힯]/.test(s)) return null; // el modelo a veces se pasa al chino
+    return s;
+}
+
 function requestNarrative(place) {
-    if (ai.state !== 'ready') return;
+    console.log("BANDERA 1: Entrando a requestNarrative. Estado de IA:", ai.state);
+
+    if (ai.state !== 'ready') {
+        console.log("BANDERA 2: La IA no está lista. Abortando.");
+        $('narrative').textContent = `¡La misión es en ${place.name}! (IA no disponible)`;
+        return;
+    }
+
+    console.log("BANDERA 3: IA lista. Enviando prompt...");
     const token = game.token;
+
+    // Cambiamos el texto temporalmente para saber que pasamos el return
+    $('narrative').textContent = `¡Alerta! ${STAR_COUNT} estrellas de energía acaban de caer en ${place.name}. ¡Ve por ellas!`;
+
     ai.generate(
         [
             {
                 role: 'system',
-                content:
-                    'Eres el comandante de una misión en un juego de carreras al aire libre. ' +
-                    'Responde en español, con un máximo de 2 frases cortas y sin emojis.',
+                content: 'Eres el comandante de una misión en un juego de carreras al aire libre. Responde en español, con un máximo de 2 frases cortas y sin emojis.',
             },
             { role: 'user', content: `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.` },
         ],
-        { max_new_tokens: 60, do_sample: true, temperature: 0.8 },
-        12000
+        { max_new_tokens: 60 },
+        60000 // Esperamos 1 minuto para cambiar la narrativa
     )
-        .then((text) => {
-            const s = cleanNarrative(text);
-            if (s && game.running && game.token === token) $('narrative').textContent = s;
-        })
-        .catch(() => {});
+    .then((text) => {
+        console.log("BANDERA 4: Respuesta recibida", text);
+
+        let rawText = typeof text === 'string' ? text : JSON.stringify(text);
+
+        if (game.running && game.token === token) {
+            console.log("BANDERA 5: Actualizando HTML con la respuesta");
+            $('narrative').textContent = rawText;
+        } else {
+            console.log("BANDERA 6: El juego se detuvo o cambió el token antes de recibir respuesta");
+        }
+    })
+    .catch((error) => {
+        console.error("BANDERA ERROR: Falló ai.generate", error);
+        if (game.running && game.token === token) {
+            $('narrative').textContent = "Error de conexión con la IA.";
+        }
+    });
 }
 
 // ---------- GPS ----------
@@ -558,7 +583,7 @@ form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (busy) return;
 
-    const raw = input.value.trim();
+    const raw = input.value.trim();//
     if (!raw) {
         setError('Escribe el nombre de una plaza o parque de Córdoba.');
         input.focus();
@@ -575,7 +600,7 @@ form.addEventListener('submit', async (e) => {
     try {
         const place = await findPlace(raw);
         if (!place) {
-            setError('No encontré ese lugar en Córdoba capital. Prueba con otro nombre, por ejemplo "Plaza San Martín".');
+            setError('No encontré ese lugar en Córdoba capital o la IA todavia no esta lista. Prueba con otro nombre, por ejemplo "Plaza San Martín".');
             return;
         }
         startGame(place);
