@@ -379,7 +379,8 @@ function requestNarrative(place) {
           },
           { role: 'user', content: userPrompt },
       ],
-    { max_new_tokens: 60, do_sample: true, temperature: 0.8 } //
+    { max_new_tokens: 60, do_sample: true, temperature: 0.8 },
+    60000
   )
   .then((text) => {
       let rawText = typeof text === 'string' ? text : text?.text || text?.generated_text || "";
