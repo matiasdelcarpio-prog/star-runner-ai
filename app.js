@@ -390,7 +390,7 @@ function requestNarrative(place) {
             },
             { role: 'user', content: `La misión es en ${place.name}. Hay ${STAR_COUNT} estrellas espaciales para recoger rápido.` },
         ],
-        { max_new_tokens: 60 },
+        { max_new_tokens: 60, do_sample: true, temperature: 0.8 },
         60000 // Esperamos 1 minuto para cambiar la narrativa
     )
     .then((text) => {
