@@ -2,16 +2,23 @@
 // Flujo (una sola pantalla visible a la vez): elegir plaza -> recoger estrellas -> jugar de nuevo -> elegir plaza ...
 
 import { playClickSound, playStarSound, playWinSound } from './audio.js';
-import { geojsonToPolygons, circlePolygon, diagonalM, randomStars, haversine } from './geo.js';
+import {
+    geojsonToPolygons, circlePolygon, bboxOf, diagonalM, pointInPolygons,
+    randomStars, haversine, createPositionFilter,
+} from './geo.js';
 import { createAI } from './ai.js';
 
 const $ = (id) => document.getElementById(id);
 
 // ---------- Configuración ----------
 const STAR_COUNT = 5;
-const COLLECT_RADIUS_M = 30;     // distancia (con GPS) a la que se puede recoger una estrella
-const MAX_AREA_DIAG_M = 1500;    // si el lugar es más grande que esto, se usa un círculo chico
-const FALLBACK_RADIUS_M = 80;    // radio del área de juego cuando el resultado es solo un punto
+const MAP_RADIUS_M = 500;          // el mapa no se puede alejar ni mover más allá de este radio
+const STAR_RADIUS_M = 400;         // las estrellas aparecen a menos de esto del centro (siempre dentro del mapa)
+const TAP_RADIUS_PX = 34;          // tolerancia del toque: se recoge la estrella más cercana a menos de esto
+const COLLECT_RADIUS_M = 30;       // modo real: distancia a la que se puede recoger una estrella
+const GPS_MAX_ACCURACY_M = 50;     // las posiciones con peor precisión (Wi-Fi, antenas, IP) se descartan
+const GPS_WARN_AFTER_MS = 20000;   // si tras este tiempo solo hay posiciones imprecisas, se avisa
+const FALLBACK_RADIUS_M = 80;      // radio del área de juego cuando el resultado es solo un punto
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CORDOBA_VIEWBOX = '-64.32,-31.30,-64.07,-31.55'; // izquierda,arriba,derecha,abajo (Córdoba capital)
 
@@ -146,15 +153,21 @@ function scoreResult(r) {
 }
 
 function toPlace(r) {
-    const center = { lat: Number(r.lat), lng: Number(r.lon) };
+    const point = { lat: Number(r.lat), lng: Number(r.lon) };
     let polygons = geojsonToPolygons(r.geojson);
-    if (!polygons.length || diagonalM(polygons) > MAX_AREA_DIAG_M) {
-        polygons = [[circlePolygon(center, FALLBACK_RADIUS_M)]];
-    }
+    if (!polygons.length) polygons = [[circlePolygon(point, FALLBACK_RADIUS_M)]];
+
+    // Centro del juego: el del rectángulo que envuelve al lugar; si cae fuera (formas en L, etc.), el punto de Nominatim
+    const b = bboxOf(polygons);
+    let center = { lat: (b.minLat + b.maxLat) / 2, lng: (b.minLng + b.maxLng) / 2 };
+    if (!pointInPolygons(center, polygons)) center = point;
+
     return {
         id: `${r.osm_type}${r.osm_id}`,
         name: r.name || r.display_name.split(',')[0],
         polygons,
+        center,
+        diag: diagonalM(polygons),
     };
 }
 
@@ -190,13 +203,18 @@ const starIcon = () =>
 
 function ensureMap() {
     if (map) return;
-    map = L.map('map', { maxZoom: 19 });
+    map = L.map('map', {
+        maxZoom: 19,
+        maxBoundsViscosity: 1, // no se puede arrastrar el mapa fuera del límite
+        doubleClickZoom: false, // tocar estrellas rápido no debe hacer zoom
+    });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
     gameLayer = L.layerGroup().addTo(map);
     userLayer = L.layerGroup().addTo(map);
+    map.on('click', onMapTap);
 }
 
 // ---------- Estado del juego ----------
@@ -208,16 +226,45 @@ const game = {
     left: 0,
     startTime: 0,
     timerId: 0,
-    gps: false,
+    real: false,        // modo real: hay que estar cerca de la estrella para recogerla
     watchId: null,
-    pos: null,
+    filter: null,
+    pos: null,          // última posición suavizada { lat, lng, acc }
+    gpsStart: 0,
+    gpsDenied: false,
+    coarseAcc: 0,       // precisión de la última posición descartada por imprecisa
+    coarseLong: false,  // ¿hace rato que solo llegan posiciones imprecisas?
 };
 
 const pad = (n) => String(n).padStart(2, '0');
 const fmt = (ms) =>
     `${pad(Math.floor(ms / 60000))}:${pad(Math.floor((ms % 60000) / 1000))}.${pad(Math.floor((ms % 1000) / 10))}`;
 
-const hint = (t) => { $('hint').textContent = t || ''; };
+// Línea de ayuda: un texto base (según el estado) y mensajes temporales encima
+let infoText = '';
+let flashTimer = 0;
+const renderHint = (t) => { $('hint').textContent = t; };
+function setInfo(t) {
+    infoText = t;
+    if (!flashTimer) renderHint(t);
+}
+function flashHint(t) {
+    renderHint(t);
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { flashTimer = 0; renderHint(infoText); }, 3500);
+}
+
+function refreshInfo() {
+    let t = game.real
+        ? 'Modo real: acércate a una estrella y tócala.'
+        : 'Toca las estrellas del mapa para recogerlas.';
+    if (game.gpsDenied) t += ' Ubicación no disponible.';
+    else if (game.pos) t += ` GPS ±${Math.round(game.pos.acc)} m`;
+    else if (game.coarseLong) t = `Tu ubicación es aproximada (±${Math.round(game.coarseAcc)} m). Activa la ubicación precisa del navegador en los ajustes del teléfono.`;
+    else if (game.coarseAcc) t += ` Mejorando la precisión del GPS (±${Math.round(game.coarseAcc)} m)…`;
+    else t += ' Buscando GPS…';
+    setInfo(t);
+}
 
 function renderStars() {
     $('stars-count').textContent = '⭐'.repeat(game.left) + '☆'.repeat(STAR_COUNT - game.left);
@@ -236,11 +283,22 @@ function nearestStar() {
 }
 
 function renderDistance() {
-    const el = $('distance');
-    if (!game.gps) { el.textContent = 'Toca una estrella del mapa'; return; }
     const n = nearestStar();
-    el.textContent = n ? `Más cercana: ${Math.round(n.dist)} m` : 'Buscando GPS…';
+    $('distance').textContent = n ? `Más cercana: ${Math.round(n.dist)} m` : ' ';
 }
+
+// Mantiene la pantalla encendida mientras se juega (si se apaga, el GPS deja de actualizarse)
+let wakeLock = null;
+async function keepAwake() {
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* no soportado: no pasa nada */ }
+}
+function releaseAwake() {
+    wakeLock?.release().catch(() => {});
+    wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && game.running) keepAwake();
+});
 
 function startGame(place) {
     stopGame();
@@ -248,34 +306,47 @@ function startGame(place) {
     game.token++;
     game.place = place;
     game.left = STAR_COUNT;
-    game.pos = null;
-    game.stars = randomStars(place.polygons, STAR_COUNT).map((p) => ({ lat: p.lat, lng: p.lng, taken: false, marker: null }));
+    game.stars = randomStars(place.polygons, STAR_COUNT, Math.random, { center: place.center, radiusM: STAR_RADIUS_M })
+        .map((p) => ({ lat: p.lat, lng: p.lng, taken: false, marker: null }));
 
     $('place-name').textContent = place.name;
     $('narrative').textContent = `¡Alerta! ${STAR_COUNT} estrellas de energía acaban de caer en ${place.name}. ¡Ve por ellas!`;
-    hint('');
     renderStars();
+    renderDistance();
+    clearTimeout(flashTimer);
+    flashTimer = 0;
 
     show('game');
     ensureMap();
     gameLayer.clearLayers();
     userLayer.clearLayers();
 
+    // Límites del mapa: radio máximo de MAP_RADIUS_M alrededor del centro, y zoom mínimo acorde
+    map.setMaxBounds(null);
+    map.setMinZoom(0);
+    map.setView([place.center.lat, place.center.lng], 16, { animate: false });
+    map.invalidateSize();
+    const limits = L.latLng(place.center.lat, place.center.lng).toBounds(MAP_RADIUS_M * 2);
+    map.setMaxBounds(limits);
+    const minZoom = map.getBoundsZoom(limits, true); // el zoom más alejado que sigue dentro del límite
+    if (Number.isFinite(minZoom)) map.setMinZoom(minZoom);
+
     // Área de juego (todos los anillos juntos; los huecos se dibujan con relleno par-impar)
     const rings = place.polygons.flat().map((ring) => ring.map(([lng, lat]) => [lat, lng]));
     const area = L.polygon(rings, { color: '#a3e635', weight: 2, fillOpacity: 0.08, interactive: false }).addTo(gameLayer);
 
     game.stars.forEach((s) => {
-        s.marker = L.marker([s.lat, s.lng], { icon: starIcon(), keyboard: false }).addTo(gameLayer);
-        // Modo práctica (sin GPS): tocar la estrella la recoge
-        s.marker.on('click', () => { if (!game.gps) collect(s); });
+        // Los toques se resuelven en onMapTap (más tolerante que el área del ícono)
+        s.marker = L.marker([s.lat, s.lng], { icon: starIcon(), interactive: false, keyboard: false }).addTo(gameLayer);
     });
 
-    map.invalidateSize();
-    map.fitBounds(area.getBounds(), { padding: [24, 24], maxZoom: 19 });
+    const fit = place.diag <= MAP_RADIUS_M * 2 ? area.getBounds() : L.latLngBounds(game.stars.map((s) => [s.lat, s.lng]));
+    map.fitBounds(fit, { padding: [28, 28], maxZoom: 19, animate: false });
 
-    setGpsMode(true);
+    startGPS();
+    setRealMode(game.real);
     requestNarrative(place);
+    keepAwake();
 
     game.startTime = performance.now();
     game.timerId = setInterval(() => {
@@ -291,7 +362,7 @@ function stopGame() {
         navigator.geolocation.clearWatch(game.watchId);
         game.watchId = null;
     }
-    game.gps = false;
+    releaseAwake();
 }
 
 function requestNarrative(place) {
@@ -318,49 +389,99 @@ function requestNarrative(place) {
 }
 
 // ---------- GPS ----------
-function setGpsMode(on, message) {
-    if (!on && game.watchId !== null) {
-        navigator.geolocation.clearWatch(game.watchId);
-        game.watchId = null;
-    }
-    if (on && !('geolocation' in navigator)) {
-        on = false;
-        message = 'Tu dispositivo no tiene GPS: modo práctica.';
-    }
-    game.gps = on;
-    $('screen-game').dataset.mode = on ? 'gps' : 'practice';
-    $('gps-toggle').textContent = on ? '📍 GPS: activado' : '📍 GPS: desactivado (modo práctica)';
+function startGPS() {
+    game.pos = null;
+    game.filter = createPositionFilter();
+    game.gpsStart = performance.now();
+    game.gpsDenied = false;
+    game.coarseAcc = 0;
+    game.coarseLong = false;
 
-    if (on && game.watchId === null) {
-        hint('Buscando señal GPS…');
-        game.watchId = navigator.geolocation.watchPosition(onPosition, onGpsError, {
-            enableHighAccuracy: true,
-            maximumAge: 2000,
-            timeout: 20000,
-        });
-    } else if (!on) {
-        userLayer?.clearLayers();
-        game.pos = null;
-        hint(message || 'Modo práctica: toca una estrella en el mapa para recogerla.');
+    if (!('geolocation' in navigator)) {
+        game.gpsDenied = true;
+        return;
     }
-    renderDistance();
+    game.watchId = navigator.geolocation.watchPosition(onPosition, onGpsError, {
+        enableHighAccuracy: true, // pide GPS real en vez de Wi-Fi/antenas
+        maximumAge: 0,            // nunca usar una posición guardada
+        timeout: 30000,
+    });
 }
 
 function onPosition(p) {
-    game.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
-    userLayer.clearLayers();
-    L.circle([game.pos.lat, game.pos.lng], { radius: game.pos.acc, color: '#38bdf8', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(userLayer);
-    L.circleMarker([game.pos.lat, game.pos.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#38bdf8', fillOpacity: 1, interactive: false }).addTo(userLayer);
-    hint('¡Corre en la vida real y presiona al llegar!');
+    if (!game.running) return;
+    const { latitude, longitude, accuracy } = p.coords;
+
+    // Una posición con mala precisión suele venir de Wi-Fi/antenas/IP y puede estar a kilómetros: se descarta
+    if (accuracy > GPS_MAX_ACCURACY_M) {
+        game.coarseAcc = accuracy;
+        game.coarseLong = performance.now() - game.gpsStart > GPS_WARN_AFTER_MS;
+        refreshInfo();
+        return;
+    }
+
+    game.coarseAcc = 0;
+    game.coarseLong = false;
+    game.pos = game.filter.update(latitude, longitude, accuracy, p.timestamp);
+    drawUser();
     renderDistance();
+    refreshInfo();
 }
 
 function onGpsError(err) {
-    if (err.code === 1) setGpsMode(false, 'Sin permiso de ubicación: modo práctica. Toca una estrella en el mapa para recogerla.');
-    else hint('Buscando señal GPS…');
+    if (err.code === 1) {
+        game.gpsDenied = true;
+        if (game.real) setRealMode(false, 'Para el modo real activa el permiso de ubicación del navegador.');
+    }
+    refreshInfo();
 }
 
+function drawUser() {
+    userLayer.clearLayers();
+    const { lat, lng, acc } = game.pos;
+    L.circle([lat, lng], { radius: acc, color: '#38bdf8', weight: 1, fillOpacity: 0.1, interactive: false }).addTo(userLayer);
+    L.circleMarker([lat, lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#38bdf8', fillOpacity: 1, interactive: false }).addTo(userLayer);
+}
+
+function setRealMode(on, message) {
+    if (on && game.gpsDenied) {
+        on = false;
+        message = 'Para el modo real activa el permiso de ubicación del navegador.';
+    }
+    game.real = on;
+    const btn = $('real-toggle');
+    btn.setAttribute('aria-pressed', String(on));
+    btn.textContent = on ? 'Modo real: activado' : 'Modo real: desactivado';
+    refreshInfo();
+    if (message) flashHint(message);
+}
+
+$('real-toggle').addEventListener('click', () => setRealMode(!game.real));
+
 // ---------- Recoger estrellas ----------
+/** Toque en el mapa: recoge la estrella más cercana al dedo (a menos de TAP_RADIUS_PX). */
+function onMapTap(e) {
+    if (!game.running) return;
+    let best = null;
+    for (const s of game.stars) {
+        if (s.taken) continue;
+        const d = map.latLngToContainerPoint([s.lat, s.lng]).distanceTo(e.containerPoint);
+        if (d <= TAP_RADIUS_PX && (!best || d < best.d)) best = { star: s, d };
+    }
+    if (best) tryCollect(best.star);
+}
+
+function tryCollect(star) {
+    if (game.real) {
+        if (!game.pos) return flashHint('Esperando una señal GPS precisa…');
+        const dist = haversine(game.pos, star);
+        if (dist > COLLECT_RADIUS_M + Math.min(game.pos.acc, 20)) {
+            return flashHint(`Estás a ${Math.round(dist)} m de esa estrella. ¡Acércate!`);
+        }
+    }
+    collect(star);
+}
+
 function collect(star) {
     if (!game.running || star.taken) return;
     star.taken = true;
@@ -379,17 +500,6 @@ function collect(star) {
 
     if (game.left === 0) finishGame();
 }
-
-$('collect-btn').addEventListener('click', () => {
-    if (!game.running || !game.gps) return;
-    const n = nearestStar();
-    if (!n) return hint('Esperando señal GPS…');
-    const tolerance = COLLECT_RADIUS_M + Math.min(game.pos.acc || 0, 20);
-    if (n.dist <= tolerance) collect(n.star);
-    else hint(`Todavía estás a ${Math.round(n.dist)} m de la estrella más cercana. ¡Sigue corriendo!`);
-});
-
-$('gps-toggle').addEventListener('click', () => setGpsMode(!game.gps));
 
 // ---------- Fin del juego ----------
 const bestKey = (id) => `sr-best:${id}`;
@@ -438,9 +548,9 @@ document.querySelectorAll('.chip').forEach((chip) =>
     })
 );
 
-// Sonido de click para todos los botones (el de recoger suena solo si recoge una estrella)
+// Sonido de click para todos los botones (las estrellas tienen su propio sonido)
 document.addEventListener('click', (e) => {
-    if (e.target.closest('button') && !e.target.closest('[data-silent]')) playClickSound();
+    if (e.target.closest('button')) playClickSound();
 });
 
 let busy = false;

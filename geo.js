@@ -85,31 +85,81 @@ export function diagonalM(polygons) {
 
 /**
  * Elige `count` puntos al azar dentro de los polígonos, separados entre sí.
+ * Si se pasa `clip = { center, radiusM }`, los puntos además quedan a menos de radiusM de `center`
+ * (sirve para parques enormes: el juego ocurre en una zona acotada).
  * La separación mínima se relaja sola si el área es muy chica o irregular.
- * Siempre termina (si el polígono es degenerado, rellena con el centro del bbox).
+ * Siempre termina: si no se encuentra lugar, rellena con el centro.
  */
-export function randomStars(polygons, count, rng = Math.random) {
-    const b = bboxOf(polygons);
-    const diag = diagonalM(polygons);
-    let minDist = Math.max(6, diag * 0.18);
-    const out = [];
-    let attempts = 0;
-    const MAX_ATTEMPTS = 20000;
-
-    while (out.length < count && attempts < MAX_ATTEMPTS) {
-        attempts++;
-        const p = {
-            lat: b.minLat + rng() * (b.maxLat - b.minLat),
-            lng: b.minLng + rng() * (b.maxLng - b.minLng),
+export function randomStars(polygons, count, rng = Math.random, clip = null) {
+    let b = bboxOf(polygons);
+    if (clip) {
+        const dLat = (clip.radiusM / R) * (180 / Math.PI);
+        const dLng = dLat / Math.cos(toRad(clip.center.lat));
+        b = {
+            minLat: Math.max(b.minLat, clip.center.lat - dLat),
+            maxLat: Math.min(b.maxLat, clip.center.lat + dLat),
+            minLng: Math.max(b.minLng, clip.center.lng - dLng),
+            maxLng: Math.min(b.maxLng, clip.center.lng + dLng),
         };
-        if (pointInPolygons(p, polygons) && out.every((q) => haversine(p, q) >= minDist)) {
-            out.push(p);
+    }
+    const fallback = clip
+        ? clip.center
+        : { lat: (b.minLat + b.maxLat) / 2, lng: (b.minLng + b.maxLng) / 2 };
+
+    const out = [];
+    if (b.minLat <= b.maxLat && b.minLng <= b.maxLng) {
+        const diag = haversine({ lat: b.minLat, lng: b.minLng }, { lat: b.maxLat, lng: b.maxLng });
+        let minDist = Math.max(6, diag * 0.18);
+        const MAX_ATTEMPTS = 20000;
+        let attempts = 0;
+
+        while (out.length < count && attempts < MAX_ATTEMPTS) {
+            attempts++;
+            const p = {
+                lat: b.minLat + rng() * (b.maxLat - b.minLat),
+                lng: b.minLng + rng() * (b.maxLng - b.minLng),
+            };
+            if (
+                (!clip || haversine(p, clip.center) <= clip.radiusM) &&
+                pointInPolygons(p, polygons) &&
+                out.every((q) => haversine(p, q) >= minDist)
+            ) {
+                out.push(p);
+            }
+            if (attempts % 200 === 0) minDist *= 0.8;
         }
-        if (attempts % 200 === 0) minDist *= 0.8;
     }
 
-    while (out.length < count) {
-        out.push({ lat: (b.minLat + b.maxLat) / 2, lng: (b.minLng + b.maxLng) / 2 });
-    }
+    while (out.length < count) out.push({ lat: fallback.lat, lng: fallback.lng });
     return out;
+}
+
+/**
+ * Filtro de posición GPS (Kalman simplificado). Cada medición se pesa según su precisión:
+ * las buenas mueven mucho la estimación y las malas casi nada, lo que elimina el "temblor".
+ * `speed` es cuánto puede moverse la persona por segundo (m/s) entre mediciones.
+ * update() devuelve { lat, lng, acc } con la precisión estimada (m).
+ */
+export function createPositionFilter(speed = 3) {
+    let s = null;
+    return {
+        update(lat, lng, accuracy, timeMs) {
+            const acc = Math.max(accuracy, 1);
+            if (!s) {
+                s = { lat, lng, variance: acc * acc, t: timeMs };
+            } else {
+                const dt = Math.max(0, (timeMs - s.t) / 1000);
+                s.variance += dt * speed * speed;
+                const k = s.variance / (s.variance + acc * acc);
+                s.lat += k * (lat - s.lat);
+                s.lng += k * (lng - s.lng);
+                s.variance = (1 - k) * s.variance;
+                s.t = timeMs;
+            }
+            return { lat: s.lat, lng: s.lng, acc: Math.sqrt(s.variance) };
+        },
+        reset() {
+            s = null;
+        },
+    };
 }

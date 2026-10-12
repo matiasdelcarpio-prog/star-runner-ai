@@ -37,7 +37,7 @@
                     <button type="button" class="chip" data-place="Plaza España">Plaza España</button>
                 </div>
             </div>
-            <button type="submit" id="start-btn" class="btn btn-lime">Generar Misión con IA</button>
+            <button type="submit" id="start-btn" class="btn btn-primary">Generar misión con IA</button>
             <p id="status" class="status" role="status" aria-live="polite"></p>
             <p id="error" class="error" role="alert"></p>
         </form>
@@ -49,11 +49,11 @@
     </section>
 
     <!-- PANTALLA 2: RECOGER ESTRELLAS -->
-    <section id="screen-game" class="screen" aria-labelledby="title-game" hidden data-mode="gps">
+    <section id="screen-game" class="screen" aria-labelledby="title-game" hidden>
         <div class="card mission">
             <div class="mission-top">
                 <h2 id="title-game" tabindex="-1" class="eyebrow">Misión en <span id="place-name">…</span></h2>
-                <button type="button" id="cancel-btn" class="link-btn">← Cambiar</button>
+                <button type="button" id="cancel-btn" class="link-btn">Cambiar lugar</button>
             </div>
             <p id="narrative" class="narrative">Generando…</p>
         </div>
@@ -69,13 +69,11 @@
             </div>
         </div>
 
-        <div id="map" role="application" aria-label="Mapa con las estrellas"></div>
+        <div id="map" role="application" aria-label="Mapa con las estrellas. Toca una estrella para recogerla."></div>
 
-        <p id="hint" class="hint" role="status" aria-live="polite"></p>
-
-        <div class="actions">
-            <button type="button" id="collect-btn" class="btn btn-amber" data-silent>¡Recoger Estrella! 🏃‍♂️💨</button>
-            <button type="button" id="gps-toggle" class="btn btn-ghost">📍 GPS: activado</button>
+        <div class="footer">
+            <p id="hint" class="hint" role="status" aria-live="polite"></p>
+            <button type="button" id="real-toggle" class="btn btn-secondary btn-small" aria-pressed="false">Modo real: desactivado</button>
         </div>
     </section>
 
@@ -83,11 +81,11 @@
     <section id="screen-victory" class="screen center" aria-labelledby="title-victory" hidden>
         <h2 id="title-victory" tabindex="-1" class="victory">¡MISIÓN CUMPLIDA! 🎉</h2>
         <div class="card time-card">
-            <p class="eyebrow">Tu Tiempo Final</p>
+            <p class="eyebrow">Tu tiempo final</p>
             <p id="final-time" class="final-time">00:00.00</p>
             <p id="best-time" class="muted small"></p>
         </div>
-        <button type="button" id="again-btn" class="btn btn-slate">Jugar de nuevo</button>
+        <button type="button" id="again-btn" class="btn btn-primary">Jugar de nuevo</button>
     </section>
 
     <noscript><p class="error">Star Runner AI necesita JavaScript para funcionar.</p></noscript>

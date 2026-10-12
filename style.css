@@ -1,19 +1,20 @@
 /* style.css - Estilos propios (reemplaza al Tailwind CDN, que pesaba ~300 KB y compilaba en el móvil) */
 
+/* Paleta: grises azulados + un único color de acento (lima). El rojo solo se usa para errores. */
 :root {
     --bg: #0f172a;
     --card: #1e293b;
     --border: #334155;
     --text: #f8fafc;
     --muted: #94a3b8;
-    --lime: #a3e635;
-    --lime-strong: #84cc16;
-    --amber: #fbbf24;
-    --red: #f87171;
+    --accent: #a3e635;
+    --on-accent: #0b1120;
+    --danger: #f87171;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 
+html { -webkit-text-size-adjust: 100%; }
 html, body { margin: 0; }
 
 body {
@@ -21,9 +22,18 @@ body {
     color: var(--text);
     font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation; /* sin zoom por doble toque en la interfaz */
     transition: background-color 0.1s;
 }
-body.flash { background: #f59e0b; }
+body.flash { background: #365314; }
+
+/* En el juego: sin rebote de scroll, sin seleccionar texto, sin menú al mantener presionado */
+body[data-screen="game"] {
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
 
 [hidden] { display: none !important; }
 
@@ -62,12 +72,12 @@ h1:focus, h2:focus { outline: none; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .stack-sm { display: flex; flex-direction: column; gap: 8px; }
 
-.title { font-size: 2.25rem; font-weight: 800; color: var(--lime); letter-spacing: -0.02em; }
+.title { font-size: 2.25rem; font-weight: 800; color: var(--accent); letter-spacing: -0.02em; }
 
 .card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: 16px;
     padding: 18px;
 }
 
@@ -83,71 +93,62 @@ input[type="text"] {
     font: inherit;
     font-size: 16px; /* evita el zoom automático de iOS al enfocar */
 }
-input[type="text"]:focus { outline: none; border-color: var(--lime); }
+input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
+/* ---- Botones: dos estilos (principal y secundario) y un solo color de acento ---- */
+.btn {
+    width: 100%;
+    min-height: 52px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    padding: 12px 18px;
+    font: inherit;
+    font-weight: 700;
+    font-size: 1rem;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: transform 0.05s, border-color 0.15s, color 0.15s;
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.6; cursor: wait; }
+
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+
+.btn-secondary { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-secondary[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
+.btn-small { width: auto; min-height: 44px; padding: 10px 14px; font-size: 0.875rem; white-space: nowrap; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
-    background: var(--bg);
+    background: transparent;
     color: #cbd5e1;
     border: 1px solid var(--border);
     border-radius: 999px;
-    padding: 8px 12px;
+    padding: 8px 14px;
     font: inherit;
     font-size: 0.8125rem;
     min-height: 40px;
     cursor: pointer;
 }
-.chip:active { border-color: var(--lime); }
-
-.btn {
-    width: 100%;
-    min-height: 54px;
-    border: 0;
-    border-radius: 16px;
-    padding: 14px 18px;
-    font: inherit;
-    font-weight: 800;
-    font-size: 1.0625rem;
-    cursor: pointer;
-    touch-action: manipulation;
-    transition: filter 0.15s, transform 0.05s;
-}
-.btn:active { transform: scale(0.98); }
-.btn:disabled { opacity: 0.6; cursor: wait; }
-.btn-lime { background: var(--lime-strong); color: #0b1120; box-shadow: 0 8px 20px rgba(132, 204, 22, 0.2); }
-.btn-amber {
-    background: var(--amber);
-    color: #0b1120;
-    font-size: 1.25rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    box-shadow: 0 8px 20px rgba(251, 191, 36, 0.2);
-}
-.btn-slate { background: #334155; color: var(--text); }
-.btn-ghost {
-    background: transparent;
-    color: #cbd5e1;
-    border: 1px solid var(--border);
-    min-height: 44px;
-    font-size: 0.875rem;
-    font-weight: 600;
-}
-.btn:focus-visible, .chip:focus-visible, .link-btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.chip:active { border-color: var(--accent); color: var(--accent); }
 
 .link-btn {
     background: none;
     border: 0;
-    color: var(--lime);
+    color: var(--accent);
     font: inherit;
     font-size: 0.8125rem;
     font-weight: 600;
-    padding: 8px 0;
+    min-height: 40px;
+    padding: 0;
     cursor: pointer;
     text-align: left;
 }
+.btn:focus-visible, .chip:focus-visible, .link-btn:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
-.status { min-height: 1.2em; text-align: center; font-size: 0.875rem; color: var(--amber); }
-.error { min-height: 1.2em; text-align: center; font-size: 0.875rem; color: var(--red); }
+.status { min-height: 1.2em; text-align: center; font-size: 0.875rem; color: #cbd5e1; }
+.error { min-height: 1.2em; text-align: center; font-size: 0.875rem; color: var(--danger); }
 .status:empty, .error:empty { display: none; }
 
 .ai-chip {
@@ -161,16 +162,25 @@ input[type="text"]:focus { outline: none; border-color: var(--lime); }
 }
 
 /* ---- Juego ---- */
-.mission { padding: 12px 14px; }
+.mission { padding: 10px 14px; }
 .mission-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .eyebrow {
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--lime);
+    color: var(--accent);
 }
-.narrative { font-size: 0.875rem; font-style: italic; color: #e2e8f0; margin-top: 4px; }
+.narrative {
+    font-size: 0.875rem;
+    font-style: italic;
+    color: #e2e8f0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 
 .hud { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .hud-item { display: flex; flex-direction: column; }
@@ -180,19 +190,18 @@ input[type="text"]:focus { outline: none; border-color: var(--lime); }
 
 #map {
     flex: 1;
-    min-height: 220px;
+    min-height: 200px;
     border: 1px solid var(--border);
     border-radius: 16px;
     overflow: hidden;
     background: var(--card);
 }
 .leaflet-container { font: inherit; background: var(--card); }
+/* Botones de zoom más grandes para el dedo */
+.leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
 
-.hint { min-height: 1.3em; text-align: center; font-size: 0.8125rem; color: var(--muted); }
-.actions { display: flex; flex-direction: column; gap: 8px; }
-
-/* Modo práctica: sin GPS se toca la estrella en el mapa */
-#screen-game[data-mode="practice"] #collect-btn { display: none; }
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.hint { flex: 1 1 150px; min-height: 1.3em; font-size: 0.8125rem; color: var(--muted); }
 
 .star-div { background: none; border: 0; }
 .star-icon {
@@ -202,17 +211,22 @@ input[type="text"]:focus { outline: none; border-color: var(--lime); }
     text-align: center;
     filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.9));
     animation: twinkle 1.4s ease-in-out infinite alternate;
-    cursor: pointer;
 }
 .star-icon.collected { animation: pop 0.35s ease-out forwards; }
 @keyframes twinkle { from { transform: scale(0.9); } to { transform: scale(1.1); } }
 @keyframes pop { to { transform: scale(2.2); opacity: 0; } }
 
 /* ---- Victoria ---- */
-.victory { font-size: 2.5rem; font-weight: 900; color: var(--lime); line-height: 1.1; }
+.victory { font-size: 2.5rem; font-weight: 900; color: var(--accent); line-height: 1.1; }
 .time-card { min-width: 250px; text-align: center; }
 .final-time { font: 900 2.25rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin-top: 4px; }
 #best-time { margin-top: 6px; }
+
+/* Celulares en horizontal: más espacio para el mapa */
+@media (max-height: 520px) {
+    .narrative { display: none; }
+    #map { min-height: 140px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
     .star-icon { animation: none; }
